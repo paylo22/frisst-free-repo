@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Собери схему — игра для электрика</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(circle at 50% 20%, #23262e, #111216 70%);
+    color: #e9e6dd; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    -webkit-tap-highlight-color: transparent; user-select: none;
+  }
+  header { text-align: center; padding: 18px 12px 6px; }
+  h1 { margin: 0; font-size: 1.5rem; letter-spacing: .5px; }
+  h1 span { color: #ffc93c; }
+  .sub { margin: 4px 0 0; color: #9a978e; font-size: .9rem; }
+  .bar {
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+    margin: 10px 0; font-size: .95rem;
+  }
+  .pill { background: #1c1e24; border: 1px solid #2e313a; padding: 6px 12px; border-radius: 999px; }
+  .pill b { color: #ffc93c; }
+  canvas { touch-action: manipulation; border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  .buttons { display: flex; gap: 10px; margin: 14px 0 8px; }
+  button {
+    font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 10px; cursor: pointer;
+    border: 1px solid #3a3d47; background: #1c1e24; color: #e9e6dd;
+  }
+  button.main { background: #ffc93c; color: #1a1a1a; border-color: #ffc93c; }
+  .help { max-width: 460px; color: #8d8a82; font-size: .85rem; text-align: center; padding: 0 16px 24px; }
+  #win {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(10,10,12,.72); backdrop-filter: blur(3px);
+  }
+  #win .box {
+    background: #1c1e24; border: 1px solid #ffc93c; border-radius: 16px;
+    padding: 24px 28px; text-align: center; max-width: 320px;
+  }
+  #win h2 { margin: 0 0 6px; color: #ffc93c; }
+  #win p { margin: 0 0 16px; color: #bdb9ae; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Собери <span>схему</span></h1>
+  <p class="sub">Подай ток от источника ко всем лампам</p>
+</header>
+
+<div class="bar">
+  <div class="pill">Уровень <b id="lvl">1</b></div>
+  <div class="pill">Ходы <b id="moves">0</b></div>
+  <div class="pill">Время <b id="time">0:00</b></div>
+  <div class="pill">Лампы <b id="lamps">0/0</b></div>
+</div>
+
+<canvas id="cv"></canvas>
+
+<div class="buttons">
+  <button onclick="newLevel(level)">Заново</button>
+  <button class="main" onclick="newLevel(level + 1)">Следующий уровень</button>
+</div>
+
+<p class="help">
+  Нажимай на клетку — кусок провода повернётся на 90°.
+  Источник ⚡ в центре. Провода под током светятся жёлтым.
+  Уровень пройден, когда горят все лампы и не осталось обесточенных проводов.
+</p>
+
+<div id="win">
+  <div class="box">
+    <h2>Схема собрана!</h2>
+    <p id="winText"></p>
+    <button class="main" onclick="newLevel(level + 1)">Дальше</button>
+  </div>
+</div>
+
+<script>
+/* ===== Направления: битовая маска соединений клетки =====
+   1 = вверх, 2 = вправо, 4 = вниз, 8 = влево                      */
+const DIRS = [
+  { bit: 1, dx: 0,  dy: -1, opp: 4 },
+  { bit: 2, dx: 1,  dy: 0,  opp: 8 },
+  { bit: 4, dx: 0,  dy: 1,  opp: 1 },
+  { bit: 8, dx: -1, dy: 0,  opp: 2 },
+];
+
+// Поворот маски на 90° по часовой стрелке
+const rotate = m => ((m << 1) | (m >> 3)) & 15;
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+
+let level = 1, size, grid, source, powered, moves, startTime, timerId, solved;
+
+/* ===== Генерация уровня =====
+   Строим случайное дерево (лабиринт) из всех клеток — это правильная схема.
+   Потом случайно поворачиваем каждую клетку — это задача для игрока.        */
+function newLevel(n) {
+  level = Math.max(1, n);
+  size = Math.min(3 + level, 10);          // 4×4, 5×5, ... до 10×10
+  grid = [];
+  for (let y = 0; y < size; y++) {
+    grid.push([]);
+    for (let x = 0; x < size; x++) grid[y].push({ mask: 0, angle: 0 });
+  }
+  source = { x: Math.floor(size / 2), y: Math.floor(size / 2) };
+
+  // Случайный обход в глубину — получается дерево без циклов
+  const seen = new Set([key(source.x, source.y)]);
+  const stack = [source];
+  while (stack.length) {
+    const cur = stack[stack.length - 1];
+    const options = DIRS.filter(d => {
+      const nx = cur.x + d.dx, ny = cur.y + d.dy;
+      return inside(nx, ny) && !seen.has(key(nx, ny));
+    });
+    if (!options.length) { stack.pop(); continue; }
+    const d = options[Math.floor(Math.random() * options.length)];
+    const nx = cur.x + d.dx, ny = cur.y + d.dy;
+    grid[cur.y][cur.x].mask |= d.bit;
+    grid[ny][nx].mask |= d.opp;
+    seen.add(key(nx, ny));
+    // Иногда идём не из последней клетки — схема получается ветвистее
+    if (Math.random() < 0.35) stack.splice(Math.floor(Math.random() * stack.length), 0, { x: nx, y: ny });
+    else stack.push({ x: nx, y: ny });
+  }
+
+  // Перемешиваем повороты
+  for (const row of grid) for (const c of row) {
+    const turns = Math.floor(Math.random() * 4);
+    for (let i = 0; i < turns; i++) c.mask = rotate(c.mask);
+  }
+  updatePower();
+  if (solved) return newLevel(level);      // случайно вышло уже собрано — перегенерируем
+
+  moves = 0; solved = false;
+  startTime = Date.now();
+  clearInterval(timerId);
+  timerId = setInterval(updateHud, 500);
+  document.getElementById("win").style.display = "none";
+  resize();
+  updateHud();
+}
+
+const key = (x, y) => x + "," + y;
+const inside = (x, y) => x >= 0 && y >= 0 && x < size && y < size;
+const isLamp = c => [1, 2, 4, 8].includes(c.mask);   // один вывод = лампа
+
+/* ===== Расчёт тока: обход от источника по взаимным соединениям ===== */
+function updatePower() {
+  powered = new Set([key(source.x, source.y)]);
+  const queue = [source];
+  while (queue.length) {
+    const { x, y } = queue.shift();
+    const m = grid[y][x].mask;
+    for (const d of DIRS) {
+      const nx = x + d.dx, ny = y + d.dy;
+      if (!(m & d.bit) || !inside(nx, ny)) continue;
+      if (!(grid[ny][nx].mask & d.opp)) continue;      // сосед не смотрит в нашу сторону
+      const k = key(nx, ny);
+      if (!powered.has(k)) { powered.add(k); queue.push({ x: nx, y: ny }); }
+    }
+  }
+  solved = powered.size === size * size;
+}
+
+/* ===== Нажатие на клетку ===== */
+cv.addEventListener("pointerdown", e => {
+  if (solved) return;
+  const r = cv.getBoundingClientRect();
+  const cell = r.width / size;
+  const x = Math.floor((e.clientX - r.left) / cell);
+  const y = Math.floor((e.clientY - r.top) / cell);
+  if (!inside(x, y)) return;
+  const c = grid[y][x];
+  c.mask = rotate(c.mask);
+  c.angle -= Math.PI / 2;                  // для плавной анимации поворота
+  moves++;
+  updatePower();
+  updateHud();
+  if (solved) setTimeout(showWin, 450);
+});
+
+function showWin() {
+  clearInterval(timerId);
+  document.getElementById("winText").textContent =
+    `Уровень ${level} за ${moves} ходов и ${timeStr()}.`;
+  document.getElementById("win").style.display = "flex";
+}
+
+function timeStr() {
+  const s = Math.floor((Date.now() - startTime) / 1000);
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+function updateHud() {
+  let lamps = 0, lit = 0;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    if (isLamp(grid[y][x])) { lamps++; if (powered.has(key(x, y))) lit++; }
+  }
+  document.getElementById("lvl").textContent = level;
+  document.getElementById("moves").textContent = moves;
+  document.getElementById("lamps").textContent = lit + "/" + lamps;
+  if (!solved) document.getElementById("time").textContent = timeStr();
+}
+
+/* ===== Размер поля под экран ===== */
+function resize() {
+  const side = Math.min(window.innerWidth - 24, window.innerHeight - 260, 560);
+  const px = Math.max(240, side);
+  const dpr = window.devicePixelRatio || 1;
+  cv.style.width = cv.style.height = px + "px";
+  cv.width = cv.height = Math.round(px * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", resize);
+
+/* ===== Рисование ===== */
+function draw() {
+  const px = cv.width / (window.devicePixelRatio || 1);
+  const cell = px / size;
+  ctx.fillStyle = "#16181d";
+  ctx.fillRect(0, 0, px, px);
+
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const c = grid[y][x];
+    c.angle *= 0.75;                        // анимация: угол плавно стремится к 0
+    if (Math.abs(c.angle) < 0.01) c.angle = 0;
+    const on = powered.has(key(x, y));
+    const cx = x * cell + cell / 2, cy = y * cell + cell / 2;
+
+    // Плитка
+    ctx.fillStyle = (x + y) % 2 ? "#1d2027" : "#1a1c22";
+    ctx.fillRect(x * cell, y * cell, cell, cell);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(c.angle);
+
+    // Провода от центра к сторонам
+    ctx.lineCap = "round";
+    ctx.lineWidth = cell * 0.16;
+    ctx.strokeStyle = on ? "#ffc93c" : "#4a4e59";
+    ctx.shadowColor = on ? "rgba(255, 201, 60, .8)" : "transparent";
+    ctx.shadowBlur = on ? cell * 0.25 : 0;
+    ctx.beginPath();
+    for (const d of DIRS) if (c.mask & d.bit) {
+      ctx.moveTo(0, 0);
+      ctx.lineTo(d.dx * cell / 2, d.dy * cell / 2);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Источник, лампа или узел
+    ctx.shadowBlur = 0;
+    if (x === source.x && y === source.y) {
+      ctx.fillStyle = "#ffc93c";
+      roundRect(cx - cell * 0.3, cy - cell * 0.3, cell * 0.6, cell * 0.6, cell * 0.12);
+      ctx.fillStyle = "#1a1a1a";
+      ctx.font = `bold ${cell * 0.4}px system-ui`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("⚡", cx, cy + cell * 0.02);
+    } else if (isLamp(c)) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, cell * 0.24, 0, Math.PI * 2);
+      ctx.fillStyle = on ? "#fff3b0" : "#2b2e36";
+      ctx.shadowColor = on ? "rgba(255, 230, 120, 1)" : "transparent";
+      ctx.shadowBlur = on ? cell * 0.6 : 0;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = cell * 0.05;
+      ctx.strokeStyle = on ? "#ffc93c" : "#5a5e6a";
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(cx, cy, cell * 0.09, 0, Math.PI * 2);
+      ctx.fillStyle = on ? "#ffc93c" : "#4a4e59";
+      ctx.fill();
+    }
+  }
+  requestAnimationFrame(draw);
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.fill();
+}
+
+newLevel(1);
+draw();
+</script>
+</body>
+</html>
