@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Калькулятор электрика</title>
+<style>
+  :root {
+    --bg: #f4f1ea; --card: #ffffff; --ink: #1d1d1b; --muted: #6b6860;
+    --accent: #e0a100; --line: #e2ddd2; --ok: #2f7d32; --warn: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.45;
+  }
+  header { padding: 28px 20px 8px; max-width: 760px; margin: 0 auto; }
+  h1 { margin: 0; font-size: 1.7rem; }
+  h1 span { color: var(--accent); }
+  header p { margin: 6px 0 0; color: var(--muted); }
+  main { max-width: 760px; margin: 0 auto; padding: 12px 20px 40px; display: grid; gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .card h2 { margin: 0 0 4px; font-size: 1.15rem; }
+  .card .hint { margin: 0 0 14px; color: var(--muted); font-size: .9rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  label { display: flex; flex-direction: column; font-size: .85rem; color: var(--muted); gap: 4px; }
+  input, select {
+    font: inherit; color: var(--ink); padding: 9px 10px; border: 1px solid var(--line);
+    border-radius: 8px; background: #fbfaf7;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  button {
+    margin-top: 14px; font: inherit; font-weight: 600; padding: 10px 18px; border: 0;
+    border-radius: 8px; background: var(--ink); color: #fff; cursor: pointer;
+  }
+  button:hover { background: #3a3a36; }
+  .result { margin-top: 14px; padding: 12px 14px; border-radius: 8px; background: #fbf4dc; font-size: 1rem; }
+  .result:empty { display: none; }
+  .result b { font-size: 1.15rem; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .bad { color: var(--warn); font-weight: 600; }
+  footer { max-width: 760px; margin: 0 auto; padding: 0 20px 32px; color: var(--muted); font-size: .82rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Калькулятор <span>электрика</span></h1>
+  <p>Закон Ома, ток по мощности и падение напряжения в кабеле.</p>
+</header>
+
+<main>
+
+  <!-- 1. Закон Ома -->
+  <section class="card">
+    <h2>1. Закон Ома</h2>
+    <p class="hint">Заполни любые два поля, оставь третье пустым — оно посчитается.</p>
+    <div class="grid">
+      <label>Напряжение U, В <input id="ohmU" type="number" step="any" inputmode="decimal"></label>
+      <label>Ток I, А <input id="ohmI" type="number" step="any" inputmode="decimal"></label>
+      <label>Сопротивление R, Ом <input id="ohmR" type="number" step="any" inputmode="decimal"></label>
+    </div>
+    <button onclick="calcOhm()">Посчитать</button>
+    <div class="result" id="ohmRes"></div>
+  </section>
+
+  <!-- 2. Ток по мощности -->
+  <section class="card">
+    <h2>2. Ток по мощности нагрузки</h2>
+    <p class="hint">Например: какой ток потянет обогреватель, станок или прогревочный трансформатор.</p>
+    <div class="grid">
+      <label>Мощность P, кВт <input id="pP" type="number" step="any" inputmode="decimal" value="3"></label>
+      <label>Сеть
+        <select id="pNet">
+          <option value="1">1 фаза, 230 В</option>
+          <option value="3">3 фазы, 400 В</option>
+        </select>
+      </label>
+      <label>cos φ <input id="pCos" type="number" step="0.01" min="0.1" max="1" value="1"></label>
+    </div>
+    <button onclick="calcCurrent()">Посчитать</button>
+    <div class="result" id="pRes"></div>
+  </section>
+
+  <!-- 3. Падение напряжения -->
+  <section class="card">
+    <h2>3. Падение напряжения в кабеле</h2>
+    <p class="hint">Проверка, не будет ли слишком большой потери напряжения на длинной линии.</p>
+    <div class="grid">
+      <label>Ток I, А <input id="dI" type="number" step="any" inputmode="decimal" value="16"></label>
+      <label>Длина линии L, м <input id="dL" type="number" step="any" inputmode="decimal" value="50"></label>
+      <label>Сечение S, мм²
+        <select id="dS">
+          <option>1.5</option><option selected>2.5</option><option>4</option><option>6</option>
+          <option>10</option><option>16</option><option>25</option><option>35</option>
+          <option>50</option><option>70</option><option>95</option><option>120</option>
+        </select>
+      </label>
+      <label>Материал
+        <select id="dMat">
+          <option value="0.0175">Медь</option>
+          <option value="0.028">Алюминий</option>
+        </select>
+      </label>
+      <label>Сеть
+        <select id="dNet">
+          <option value="1">1 фаза, 230 В</option>
+          <option value="3">3 фазы, 400 В</option>
+        </select>
+      </label>
+      <label>cos φ <input id="dCos" type="number" step="0.01" min="0.1" max="1" value="1"></label>
+    </div>
+    <button onclick="calcDrop()">Посчитать</button>
+    <div class="result" id="dRes"></div>
+  </section>
+
+</main>
+
+<footer>
+  Расчёт по базовым формулам, без учёта индуктивного сопротивления и нагрева жил.
+  Сечение кабеля по допустимому току всё равно выбирай по таблицам ПУЭ.
+  <br>Учебный проект — репозиторий <a href="https://github.com/paylo22/frisst-free-repo">frisst-free-repo</a>.
+</footer>
+
+<script>
+  // Читает число из поля; пустое поле -> null
+  function num(id) {
+    const v = document.getElementById(id).value.trim().replace(",", ".");
+    return v === "" ? null : Number(v);
+  }
+  // Красивый вывод числа
+  function fmt(x, digits = 2) {
+    return Number(x.toFixed(digits)).toLocaleString("ru-RU");
+  }
+  function show(id, html) { document.getElementById(id).innerHTML = html; }
+
+  // 1. Закон Ома: U = I * R
+  function calcOhm() {
+    const U = num("ohmU"), I = num("ohmI"), R = num("ohmR");
+    const filled = [U, I, R].filter(v => v !== null).length;
+    if (filled !== 2) {
+      show("ohmRes", '<span class="bad">Заполни ровно два поля из трёх.</span>');
+      return;
+    }
+    if (U === null) {
+      show("ohmRes", `U = I × R = <b>${fmt(I * R)} В</b>, мощность P = <b>${fmt(I * I * R)} Вт</b>`);
+    } else if (I === null) {
+      if (R === 0) return show("ohmRes", '<span class="bad">Сопротивление не может быть 0.</span>');
+      const i = U / R;
+      show("ohmRes", `I = U / R = <b>${fmt(i)} А</b>, мощность P = <b>${fmt(U * i)} Вт</b>`);
+    } else {
+      if (I === 0) return show("ohmRes", '<span class="bad">Ток не может быть 0.</span>');
+      show("ohmRes", `R = U / I = <b>${fmt(U / I)} Ом</b>, мощность P = <b>${fmt(U * I)} Вт</b>`);
+    }
+  }
+
+  // 2. Ток по мощности
+  function calcCurrent() {
+    const P = num("pP"), cos = num("pCos"), net = document.getElementById("pNet").value;
+    if (!P || !cos || cos <= 0 || cos > 1) {
+      show("pRes", '<span class="bad">Проверь мощность и cos φ (от 0,1 до 1).</span>');
+      return;
+    }
+    const W = P * 1000;
+    const I = net === "1" ? W / (230 * cos) : W / (Math.sqrt(3) * 400 * cos);
+    const formula = net === "1" ? "I = P / (U × cos φ)" : "I = P / (√3 × U × cos φ)";
+    show("pRes", `${formula} = <b>${fmt(I, 1)} А</b>` +
+      (net === "3" ? " в каждой фазе" : ""));
+  }
+
+  // 3. Падение напряжения
+  function calcDrop() {
+    const I = num("dI"), L = num("dL"), cos = num("dCos");
+    const S = Number(document.getElementById("dS").value);
+    const rho = Number(document.getElementById("dMat").value); // Ом·мм²/м
+    const net = document.getElementById("dNet").value;
+    if (!I || !L || !cos || cos <= 0 || cos > 1) {
+      show("dRes", '<span class="bad">Заполни ток, длину и cos φ.</span>');
+      return;
+    }
+    const U = net === "1" ? 230 : 400;
+    // 1 фаза: ток идёт туда и обратно -> 2L; 3 фазы: √3
+    const k = net === "1" ? 2 : Math.sqrt(3);
+    const dU = k * I * rho * L * cos / S;
+    const pct = dU / U * 100;
+    const verdict = pct <= 5
+      ? '<span class="ok">в пределах 5% — нормально</span>'
+      : '<span class="bad">больше 5% — стоит взять сечение больше</span>';
+    show("dRes", `Потеря: <b>${fmt(dU)} В</b> (${fmt(pct)}%), на нагрузке останется ≈ ${fmt(U - dU, 1)} В — ${verdict}`);
+  }
+</script>
+</body>
+</html>
